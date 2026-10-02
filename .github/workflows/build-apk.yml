@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.24.5'
+          cache: true
+
+      - name: Locate the Flutter project
+        id: locate
+        run: |
+          if [ -f pubspec.yaml ]; then
+            DIR="."
+          else
+            PUB=$(find . -mindepth 2 -maxdepth 3 -name pubspec.yaml | head -n 1)
+            if [ -z "$PUB" ]; then
+              echo "::error::Could not find pubspec.yaml in the repository."
+              exit 1
+            fi
+            DIR=$(dirname "$PUB")
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Located Flutter project at: $DIR"
+
+      - name: Generate Android platform files
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: flutter create --org com.akash.upitracker --project-name upi_expense_tracker --platforms android .
+
+      - name: Install dependencies
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: flutter pub get
+
+      - name: Apply app customizations
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: |
+          cp platform_overrides/android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          MAIN=$(find android/app/src/main/kotlin -name MainActivity.kt | head -n 1)
+          cp platform_overrides/android/app/src/main/kotlin/com/akash/upitracker/upi_expense_tracker/MainActivity.kt "$MAIN"
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
+
+      - name: Build release APK
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: upi-expense-tracker-apk
+          path: ${{ steps.locate.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
